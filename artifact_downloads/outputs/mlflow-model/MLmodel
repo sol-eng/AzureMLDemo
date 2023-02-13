@@ -1,0 +1,47 @@
+artifact_path: outputs/mlflow-model
+flavors:
+  python_function:
+    env: conda.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.8.15
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: pickle
+    sklearn_version: 0.22.1
+mlflow_version: 1.30.0
+model_uuid: c23f7509fef24616a136405cdffea4e6
+run_id: cool_leg_8gv3wntnmq_3
+signature:
+  inputs: '[{"name": "Account Length", "type": "long"}, {"name": "Area Code", "type":
+    "string"}, {"name": "VMail Message", "type": "string"}, {"name": "Day Mins", "type":
+    "double"}, {"name": "Day Calls", "type": "string"}, {"name": "Eve Mins", "type":
+    "double"}, {"name": "Eve Calls", "type": "string"}, {"name": "Night Mins", "type":
+    "double"}, {"name": "Night Calls", "type": "string"}, {"name": "Intl Mins", "type":
+    "double"}, {"name": "Intl Calls", "type": "string"}, {"name": "CustServ Calls",
+    "type": "string"}, {"name": "intlplan", "type": "string"}, {"name": "VMail plan",
+    "type": "string"}, {"name": "AK", "type": "string"}, {"name": "AL", "type": "string"},
+    {"name": "AR", "type": "string"}, {"name": "AZ", "type": "string"}, {"name": "CA",
+    "type": "string"}, {"name": "CO", "type": "string"}, {"name": "CT", "type": "string"},
+    {"name": "DC", "type": "string"}, {"name": "DE", "type": "string"}, {"name": "FL",
+    "type": "string"}, {"name": "GA", "type": "string"}, {"name": "HI", "type": "string"},
+    {"name": "IA", "type": "string"}, {"name": "ID", "type": "string"}, {"name": "IL",
+    "type": "string"}, {"name": "IN", "type": "string"}, {"name": "KS", "type": "string"},
+    {"name": "KY", "type": "string"}, {"name": "LA", "type": "string"}, {"name": "MA",
+    "type": "string"}, {"name": "MD", "type": "string"}, {"name": "ME", "type": "string"},
+    {"name": "MI", "type": "string"}, {"name": "MN", "type": "string"}, {"name": "MO",
+    "type": "string"}, {"name": "MS", "type": "string"}, {"name": "MT", "type": "string"},
+    {"name": "NC", "type": "string"}, {"name": "ND", "type": "string"}, {"name": "NE",
+    "type": "string"}, {"name": "NH", "type": "string"}, {"name": "NJ", "type": "string"},
+    {"name": "NM", "type": "string"}, {"name": "NV", "type": "string"}, {"name": "NY",
+    "type": "string"}, {"name": "OH", "type": "string"}, {"name": "OK", "type": "string"},
+    {"name": "OR", "type": "string"}, {"name": "PA", "type": "string"}, {"name": "RI",
+    "type": "string"}, {"name": "SC", "type": "string"}, {"name": "SD", "type": "string"},
+    {"name": "TN", "type": "string"}, {"name": "TX", "type": "string"}, {"name": "UT",
+    "type": "string"}, {"name": "VA", "type": "string"}, {"name": "VT", "type": "string"},
+    {"name": "WA", "type": "string"}, {"name": "WI", "type": "string"}, {"name": "WV",
+    "type": "string"}, {"name": "WY", "type": "string"}]'
+  outputs: '[{"type": "tensor", "tensor-spec": {"dtype": "int64", "shape": [-1]}}]'
+utc_time_created: '2023-02-09 02:10:33.740681'

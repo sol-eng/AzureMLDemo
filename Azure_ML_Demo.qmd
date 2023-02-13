@@ -1,0 +1,718 @@
+---
+title: "Azure ML Training Demo"
+author: "Roger Andre"
+toc: false
+format:
+  html:
+    code-fold: false
+    page-layout: full
+  pdf:
+    documentclass: scrreprt
+knitr: 
+  opts_chunk: 
+    collapse: false
+---
+## Background
+
+The purpose of this doc is to show a common workflow to train and publish a machine learning model in Azure ML.  An opinionated view of Azure ML and potential synergies with Posit Pro products can be found [here](https://rstudiopbc.atlassian.net/wiki/spaces/PRO/pages/246120640/Azure+ML+Integration+Thoughts).
+
+## Prereqs
+
+In order for to implement the code in this training, you will need to have a few things setup first.
+
+1. Access to an active Azure subscription
+2. An Azure ML Workspace
+3. A Python environment
+4. An installed version of the Azure Machine Learning Python SDK V2
+
+## Setup Azure ML Workspace
+
+Information on how to setup an Azure ML Workspace can be found in the [Getting Started with Workbench in Azure  ML](https://rstudiopbc.atlassian.net/wiki/spaces/PRO/pages/216039632/Getting+Started+with+Workbench+in+Azure+ML) Confluence doc.
+
+## Install Python SDK V2 and supporting pkgs
+
+_*Note: *_ Using the Python `azureml` library on Ubuntu 20.04 requires careful setup of supporting packages to work.  This is due to version dependencies which are present in Microsoft's implementation of the library.  These dependencies also prevent the package from working properly on vanilla VM images of Ubuntu 22.04.
+
+To get azureml code to run on Ubuntu Linux 20.04 (or other Focal dustributions):
+
+```{r}
+#| echo: true
+#| eval: false
+#| output: asis
+# Linux lib dependency (default version, liblttng-ust1, can stay)
+$ sudo apt install liblttng-ust0 
+
+# Remove Python pkgs that are too new
+$ sudo pip3 uninstall cryptography
+$ sudo pip3 uninstall pyOpenSSL
+
+# Remove Python package dirs 
+$ sudo rm -rf /usr/local/lib/python3.8/dist-packages/OpenSSL*
+$ sudo rm -rf /usr/local/lib/python3.8/dist-packages/pyOpenSSL*
+
+# Reinstall lower version Python prereq packages
+$ sudo pip3 install pyOpenSSL==22.1.0 cryptography==38.0.4
+
+# Verify that pip still works
+$ sudo pip3 install --upgrade pip 
+
+# Install Python azureml SDK
+$ sudo pip3 install azureml
+$ sudo pip3 install azureml-core
+$ sudo pip3 install azureml-dataset-runtime
+```
+
+## Machine Learning Modeling Workflow
+
+A common Machine Learning workflow looks like this.
+
+1. Obtain data (and store it somewhere) 
+2. Analyze data (Exploratory Data Analysis)
+3. Shape data for use in ML algorithms (create new variables, etc.)
+4. Divide data into Training, Test and Validation sets
+5. Train different models to find one that performs the best
+6. Save a model for later use
+7. Deploy the model
+8. Use the model to obtain predictions
+
+The following sections will go over the steps in that workflow.
+
+## Storing Data in Azure
+
+There are a couple core concepts to understand when working with data in Azure.  The main one is that data is pulled into ML tasks from "datasets" which are contained in "datastores".  Azure blob containers and Azure file shares are both considered "datastores".
+
+When you create an Azure ML workspace, ie ["randre_azml_test_2"](https://rstudiopbc.atlassian.net/wiki/spaces/PRO/pages/216039632/Getting+Started+with+Workbench+in+Azure+ML), a blob container and file share are automatically registered as datastores of that workspace.  The blob storage, `workspaceblobstore` is set as the default datastore and configured for use automatically.
+
+You can see the datastores associated with a specific workspace by logging into the AZML Studio and looking under "Data" in the "Assets" pane.  
+![Datastores](./images/azml_workspace_datastores.png)
+
+For our purposes, a "TabularDataset" is the most useful to use, but a "FileDataset" type is available as well.  TabularDatasets can be created from .csv, .tsv, .parquet, .jsonl files, and from SQL query results.  We can easily create the dataset through the AZML Studio, which has the added benefit of automatically registering the new dataset to the workspace.
+
+![Dataset_Creation](./images/azml_create_data_asset.png)
+
+When creating the new Data Asset, the storage path can be a local file, as in this case where we selected a CSV file from local disk.  As part of the data set creaton process for a TabularDataset, you will be able to specify the data types for each field.  When done, the "Explore" option in the Dataset will let you verify that the data has uploaded correctly.  
+
+![TabularDataset](./images/azml_new_tabulardataset.png)
+
+After the dataset has been created, it will be visible in the "Data" pane of your AZML Studio interface.
+
+![Datasets List](./images/azml_datasets_list.png)
+
+## Accessing Data from non-Azure ML Data Stores
+
+In some cases, you will want to access data contained in Blob Storage that is not associated with your Azure ML datastore.  You can link these data sets to your Azure ML workspace via their URIs.  
+
+## Access Blob dataset from Workbench in AZML
+
+If you open the "raw_churn" dataset we uploaded in AZML Studio and click on the "Consume" tab, you will see instructions for how to access it in Python.
+
+![Python Dataset Access](./images/azml_dataset_python_access.png)
+
+These instructions work as-is if you launch a Jupyter (AZML-native) session in your AZML Studio compute instance.  We can do something similar in R, from the Workbench running as a Custom Application, by doing the following.
+
+
+## Access the Data
+
+The R code example below reads the default blobstore in your AZML Workspace and pulls in a data set named `raw churn` into your session.  This data was previously uploaded into the AZML workspace, but you are not limited to using the default blobstore there.  If you have a dataset that is in another Azure datastore, you can link it to your ML Workspace via the dataset URI.  However, for training and experimentation, it can be useful to use the datastores that are enabled for you when you create the AZML workspace.
+
+
+```{r}
+#| echo: true
+#| eval: false
+library(dplyr)
+
+# Setup Python env (after `pip install azureml` etc. in corresponding location)
+library(reticulate)
+
+# Define Blob datastore location and access info
+subscription_id = 'cdc5ba7c-38d0-43f9-9670-7b37680ad295'
+resource_group = 'sol-eng'
+workspace_name = 'randre_azml_test_2'
+
+# Load in the dataset set from Blob storage
+import('azureml')
+import('azureml.core')
+
+# Define the workspace and get the data
+workspace = azureml$core$Workspace(subscription_id, resource_group, workspace_name)
+dataset = azureml$core$Dataset$get_by_name(workspace, name='raw_churn')
+
+# Gives us a std R data.frame
+df <- dataset$to_pandas_dataframe()
+View(df)
+```
+
+### Visualize some of the data
+```{r}
+#| echo: true
+#| eval: true  
+#| output: true
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(knitr)
+library(ggplot2)
+raw_churn <- fread("./dataset/raw_churn.csv", keepLeadingZeros = TRUE)
+
+kable(raw_churn[1:5,], caption = "Customer churn in a cellular company")
+
+raw_churn = select(raw_churn, -c("Phone", "Day Charge", "Eve Charge", "Night Charge", "Intl Charge"))
+
+raw_churn <- rename(raw_churn, "intlplan" = "Int'l Plan")
+raw_churn <- rename(raw_churn, "churn" = "Churn?")
+
+ggplot(raw_churn, aes(x = churn, fill = intlplan)) +  geom_bar() + theme_classic()
+
+hist(raw_churn$"CustServ Calls"[which(raw_churn$churn == "True.")], 
+     col = 'red', 
+     breaks = 15, 
+     ylim = c(0,600), 
+     main = "Churn = True", 
+     xlab = "Customer Service Calls")
+
+hist(raw_churn$"CustServ Calls"[which(raw_churn$churn == "False.")], 
+     col = 'blue', 
+     breaks = 15, 
+     ylim = c(0,600), 
+     main = "Churn = False", 
+     xlab = "Customer Service Calls")
+
+```
+
+## Analyze, Clean and Reshape the Data
+
+```{r}
+#| echo: true
+#| eval: true  
+#| output: false
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(readr)
+
+####--------------- Clean data ----------------------------------------- ####
+churn <- fread("./dataset/raw_churn.csv", keepLeadingZeros = TRUE)
+
+#Remove fields we don't need
+churn = select(churn, -c("Phone", "Day Charge", "Eve Charge", "Night Charge", "Intl Charge"))
+
+#Rename fields to work better in ML code
+churn <- rename(churn, "intlplan" = "Int'l Plan")
+churn <- rename(churn, "churn" = "Churn?")
+
+#Changing target variable 'churn' into dummy variable and keeping just True column while dropping False
+churn <- churn %>% 
+  mutate(dummy=1) %>% 
+  spread(key="churn",value=dummy, fill=0)
+
+churn <- subset(churn, select = -c(False.))
+churn <- rename(churn, "churn" = True.)
+
+#Making the target variable "churn" as the first column as XGBoost expects the data to be in this format
+churn <- churn %>% select("churn", everything())
+
+#Transforming intlplan (international plan) to dummy, dropping resulting "no" variable and renaming "yes" using dplyr's rename method
+churn <- churn %>% 
+  mutate(dummy=1) %>% 
+  spread(key="intlplan",value=dummy, fill=0)
+
+churn <- subset(churn, select = -c(no))
+churn <- rename(churn, "intlplan" = yes)
+
+#Transforming VMaill plan to dummy, dropping resulting "no" variable and renaming "yes" using dplyr's rename method
+churn <- churn %>% 
+  mutate(dummy=1) %>% 
+  spread(key="VMail Plan",value=dummy, fill=0)
+
+churn <- subset(churn, select = -c(no))
+churn <- rename(churn, "VMail plan" = yes)
+
+#Transforming variable "State" into dummy variables
+churn <- churn %>% mutate(dummy=1) %>% spread(key="State",value=dummy, fill=0)
+
+
+####-------- Split the data up into 'train', 'test', 'valid' sets ----####
+# Create training set and remove it from 'churn'
+churn_train <- churn %>% sample_frac(size = 0.7)
+churn <- anti_join(churn, churn_train)
+
+# Create test set
+churn_test <- churn %>% sample_frac(size = 0.5)
+churn_valid <- anti_join(churn, churn_test)
+
+# Remove the 'churn' (target) field from test data
+churn_test <- churn_test[-1]
+```
+
+## Save the reshaped and split data locally
+
+```{r}
+#| echo: true
+#| eval: false  
+#| output: false
+write_csv(churn_train, 'dataset/churn_train.csv')
+write_csv(churn_valid, 'dataset/churn_valid.csv')
+write_csv(churn_test, 'dataset/churn_test.csv')
+write_csv(churn, 'dataset/churn.csv')
+```
+
+## Create a Compute Cluster
+
+```{python}
+#| echo: true
+#| eval: false  
+#| output: false
+from azure.ai.ml import MLClient
+from azure.ai.ml.entities import ComputeInstance, AmlCompute
+from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
+from azureml.core import Workspace
+
+subscription_id = 'cdc5ba7c-38d0-43f9-9670-7b37680ad295'
+resource_group = 'sol-eng'
+workspace_name = 'randre_azml_test_2'
+
+# Obtain an auth token
+credential = InteractiveBrowserCredential()
+credential.get_token("https://management.azure.com/.default")
+
+# Create the ml_client
+ml_client = MLClient(
+  credential=credential, 
+  subscription_id=subscription_id, 
+  resource_group_name=resource_group,
+  workspace_name=workspace_name
+  )
+
+print(ml_client)
+
+# Create the Compute Cluster (eastus is our default)
+cluster_basic = AmlCompute(
+    name="randre-compute-cluster",
+    type="amlcompute",
+    size="STANDARD_DS3_v2",
+    location="westus",
+    min_instances=1,
+    max_instances=1,
+    idle_time_before_scale_down=120,
+)
+
+ml_client.begin_create_or_update(cluster_basic).result()
+```
+
+## Upload the training data and train the model
+
+We will be using the automl training method here, which iterates through multiple algorithms to find the one that works best with our data.
+
+```{python}
+#| echo: true
+#| eval: false  
+#| output: false
+# train_model.py
+
+from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
+from azureml.core import Workspace, Dataset
+from azure.ai.ml import automl, Input, MLClient
+from azure.ai.ml.constants import AssetTypes, InputOutputModes
+
+# Step 1 - Connect to the ML Workspace -----------------------------------------
+subscription_id = 'cdc5ba7c-38d0-43f9-9670-7b37680ad295'
+resource_group = 'sol-eng'
+workspace_name = 'randre_azml_test_2'
+
+# Obtain an auth token
+credential = InteractiveBrowserCredential()
+credential.get_token("https://management.azure.com/.default")
+
+# Create the ml_client
+ml_client = MLClient(credential, subscription_id, resource_group, workspace_name)
+
+# Verify workspace info
+workspace = ml_client.workspaces.get(name=ml_client.workspace_name)
+
+workspace_info = {}
+workspace_info["Workspace"] = ml_client.workspace_name
+workspace_info["Subscription ID"] = ml_client.connections._subscription_id
+workspace_info["Resource Group"] = workspace.resource_group
+workspace_info["Location"] = workspace.location
+
+# Step 2 - Define the training data ----------------------------------------
+
+# Define from a local folder containing data and MLTable YAML definition (1st time)
+my_training_data_input = Input(type=AssetTypes.MLTABLE, path="./dataset/training-mltable-folder")
+
+# If MLTABLE already exists, access it like this (doesn't work)
+#my_training_data_input = Input(type=AssetTypes.MLTABLE, path="azureml://subscriptions/cdc5ba7c-38d0-43f9-9670-7b37680ad295/resourcegroups/sol-eng/workspaces/randre_azml_test_2/datastores/workspaceblobstore/paths/LocalUpload/eb1828b7ffb1eccf6cc829194dfa7080/training-mltable-folder/")
+
+# Step 3 - Define the type of model training job -------------------------------
+compute_name = "randre-compute-cluster"
+
+# Verify that the compute_cluster exists
+print(ml_client.compute.get(compute_name))
+
+# Create the AutoML classification job with the related factory-function.
+# https://learn.microsoft.com/en-us/azure/machine-learning/how-to-configure-auto-train
+
+classification_job = automl.classification(
+    compute=compute_name,
+    experiment_name="azml_python_model_train2",
+    training_data=my_training_data_input,
+    target_column_name="churn",
+    primary_metric="accuracy",
+    n_cross_validations=5,
+    enable_model_explainability=True,
+    tags={"AZML_Model_Run": "python-only"}
+)
+
+classification_job.set_limits(
+    timeout_minutes=600, 
+    trial_timeout_minutes=20, 
+    max_trials=5,
+    enable_early_termination=True,
+)
+
+classification_job.set_training(
+    blocked_training_algorithms=["LogisticRegression"], 
+    enable_onnx_compatible_models=True
+)
+
+# Submit the AutoML job
+returned_job = ml_client.jobs.create_or_update(classification_job)  # submit the job to the backend
+print(f"Created job: {returned_job}")
+
+returned_job.services["Studio"].endpoint
+print(returned_job.name)
+
+print(returned_job.status)
+
+# Job name = "cool_leg_8gv3wntnmq"
+```
+
+## Retrieve the best trial info and model
+```{python}
+#| echo: true
+#| eval: false  
+#| output: false
+# Access the models and artifacts from the training run
+import os
+import mlflow
+from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
+from azureml.core import Workspace, Dataset
+from azure.ai.ml import automl, Input, MLClient
+from azure.ai.ml.constants import AssetTypes, InputOutputModes
+from mlflow.tracking.client import MlflowClient
+
+# Step 1 - Connect to the ML Workspace -----------------------------------------
+subscription_id = 'cdc5ba7c-38d0-43f9-9670-7b37680ad295'
+resource_group = 'sol-eng'
+workspace_name = 'randre_azml_test_2'
+
+# Obtain an auth token
+credential = InteractiveBrowserCredential()
+credential.get_token("https://management.azure.com/.default")
+
+# Create the ml_client
+ml_client = MLClient(credential, subscription_id, resource_group, workspace_name)
+
+# Obtain the tracking URL from MLClient
+MLFLOW_TRACKING_URI = ml_client.workspaces.get(name=ml_client.workspace_name).mlflow_tracking_uri
+
+print(MLFLOW_TRACKING_URI)
+# azureml://eastus.api.azureml.ms/mlflow/v1.0/subscriptions/cdc5ba7c-38d0-43f9-9670-7b37680ad295/resourceGroups/sol-eng/providers/Microsoft.MachineLearningServices/workspaces/randre_azml_test_2
+
+# Set the MLFLOW TRACKING URI
+mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+
+print("\nCurrent tracking uri: {}".format(mlflow.get_tracking_uri()))
+
+# Initialize MLFlow client
+mlflow_client = MlflowClient()
+
+# Get this either from the GUI, or save it from when you start the training session
+job_name = "cool_leg_8gv3wntnmq" 
+
+# ------------ Get the parent run
+mlflow_parent_run = mlflow_client.get_run(job_name)
+
+print("Parent Run: ")
+print(mlflow_parent_run)
+
+# Print parent run tags. 'automl_best_child_run_id' tag should be there.
+print(mlflow_parent_run.data.tags)
+
+# --------Get the best model's child run
+
+best_child_run_id = mlflow_parent_run.data.tags["automl_best_child_run_id"]
+print("Found best child run id: ", best_child_run_id)
+
+best_run = mlflow_client.get_run(best_child_run_id)
+
+print("Best child run: ")
+print(best_run)
+
+# ------------Get best model run's metrics
+best_run.data.metrics
+
+# ---------- Download the best model locally
+# Create local folder
+local_dir = "./artifact_downloads"
+if not os.path.exists(local_dir):
+    os.mkdir(local_dir)
+
+# Download run's artifacts/outputs
+local_path = mlflow_client.download_artifacts(best_run.info.run_id, "outputs", local_dir)
+print("Artifacts downloaded in: {}".format(local_path))
+print("Artifacts: {}".format(os.listdir(local_path)))
+```
+
+## Register the best model and deploy it to an endpoint
+```{python}
+#| echo: true
+#| eval: false  
+#| output: false
+import datetime
+from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
+from azure.ai.ml import MLClient
+from azure.ai.ml.entities import (
+    ManagedOnlineEndpoint,
+    ManagedOnlineDeployment,
+    Model,
+    Environment,
+    CodeConfiguration,
+    ProbeSettings,
+)
+from azure.ai.ml.constants import ModelType
+
+# ----- Create an ml_client to interact with ML Workspace
+subscription_id = 'cdc5ba7c-38d0-43f9-9670-7b37680ad295'
+resource_group = 'sol-eng'
+workspace_name = 'randre_azml_test_2'
+
+# Obtain an auth token
+credential = InteractiveBrowserCredential()
+credential.get_token("https://management.azure.com/.default")
+
+# Create the ml_client
+ml_client = MLClient(credential, subscription_id, resource_group, workspace_name)
+
+# Register the model
+model_name = "phonechurn-model"
+
+model = Model(path="artifact_downloads/outputs/model.pkl", name=model_name)
+
+registered_model = ml_client.models.create_or_update(model)
+
+registered_model.id
+
+# Create unique endpoint name to avoid conflicts
+online_endpoint_name = "phonechurn-" + datetime.datetime.now().strftime("%Y-%m-%d-%H%M")
+
+endpoint = ManagedOnlineEndpoint(
+    name=online_endpoint_name,
+    description="Online endpoint for phonechurn model",
+    auth_mode="key",
+    tags={"datatype": "churn"},
+)
+# create the online endpoint
+ml_client.begin_create_or_update(endpoint).result()
+
+# Setup the environment
+env = Environment(
+    name="automl-phonechurn-env",
+    description="environment for automl inference",
+    image="mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04",
+    conda_file="artifact_downloads/outputs/conda_env_v_1_0_0.yml",
+)
+
+code_configuration = CodeConfiguration(
+    code="artifact_downloads/outputs/", scoring_script="scoring_file_v_2_0_0.py"
+)
+
+deployment = ManagedOnlineDeployment(
+    name="phonechurn-deploy",
+    endpoint_name=online_endpoint_name,
+    model=registered_model.id,
+    environment=env,
+    code_configuration=code_configuration,
+    instance_type="Standard_DS1_V2",
+    instance_count=1,
+)
+
+ml_client.online_deployments.begin_create_or_update(deployment)
+
+# phonechurn-deploy deployment to take 100% traffic
+ml_client.begin_create_or_update(endpoint).result()
+
+# Confirm endpoint deployed correctly
+ml_client.online_endpoints.get(name=online_endpoint_name)
+```
+
+## Test the deployment
+
+```{python}
+#| echo: true
+#| eval: false  
+#| output: false
+import pandas as pd
+
+test_data = pd.read_csv("./dataset/churn_test.csv")
+
+test_data_json = test_data.to_json(orient="records", indent=4)
+
+data = (
+    '{ \
+          "Inputs": {"data": '
+    + test_data_json
+    + "}}"
+)
+
+request_file_name = "./dataset/churn_test.json"
+
+with open(request_file_name, "w") as request_file:
+    request_file.write(data)
+
+ml_client.online_endpoints.invoke(
+    endpoint_name=online_endpoint_name,
+    deployment_name="phonechurn-deploy",
+    request_file="./dataset/churn_test.json",
+)
+
+# '{"Results": [0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 
+# 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 
+# 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 
+# 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 
+# etc.
+```
+
+## Get a prediction from the REST API
+
+```{r}
+#| echo: true
+#| eval: true
+library("RCurl")
+library("rjson")
+
+# Accept SSL certificates issued by public Certificate Authorities
+options(RCurlOptions = list(cainfo = system.file("CurlSSL", "cacert.pem", package = "RCurl"), ssl.verifypeer = FALSE))
+
+h = basicTextGatherer()
+hdr = basicHeaderGatherer()
+
+# Request data goes here
+# The example below assumes JSON formatting which may be updated
+# depending on the format your endpoint expects.
+# More information can be found here:
+# https://docs.microsoft.com/azure/machine-learning/how-to-deploy-advanced-entry-script
+req = fromJSON('{
+  "Inputs": {
+    "data": [
+      {
+        "Account Length":183,
+        "Area Code":736,
+        "VMail Message":400,
+        "Day Mins":2.906097297,
+        "Day Calls":3,
+        "Eve Mins":4.8406735605,
+        "Eve Calls":4,
+        "Night Mins":2.458387374,
+        "Night Calls":200,
+        "Intl Mins":6.161458937,
+        "Intl Calls":6,
+        "CustServ Calls":9,
+        "intlplan":0,
+        "VMail plan":1,
+        "AK":0,
+        "AL":0,
+        "AR":0,
+        "AZ":0,
+        "CA":0,
+        "CO":0,
+        "CT":0,
+        "DC":0,
+        "DE":0,
+        "FL":0,
+        "GA":0,
+        "HI":0,
+        "IA":1,
+        "ID":0,
+        "IL":0,
+        "IN":0,
+        "KS":0,
+        "KY":0,
+        "LA":0,
+        "MA":0,
+        "MD":0,
+        "ME":0,
+        "MI":0,
+        "MN":0,
+        "MO":0,
+        "MS":0,
+        "MT":0,
+        "NC":0,
+        "ND":0,
+        "NE":0,
+        "NH":0,
+        "NJ":0,
+        "NM":0,
+        "NV":0,
+        "NY":0,
+        "OH":0,
+        "OK":0,
+        "OR":0,
+        "PA":0,
+        "RI":0,
+        "SC":0,
+        "SD":0,
+        "TN":0,
+        "TX":0,
+        "UT":0,
+        "VA":0,
+        "VT":0,
+        "WA":0,
+        "WI":0,
+        "WV":0,
+        "WY":0
+      }
+    ]
+  },
+  "GlobalParameters": {
+    "method": "predict"
+  }
+}')
+
+requestBody = enc2utf8(toJSON(req))
+# Replace this with the primary/secondary key or AMLToken for the endpoint
+api_key = "wORGILChU943JfOah3nGUKjlZy9bkLw8"
+if (api_key == "" || !is.character(api_key))
+{
+    stop("A key should be provided to invoke the endpoint")
+}
+authz_hdr = paste('Bearer', api_key, sep=' ')
+
+h$reset()
+
+# The azureml-model-deployment header will force the request to go to a specific deployment.
+# Remove this header to have the request observe the endpoint traffic rules
+curlPerform(
+    url = "https://phonechurn-2023-02-09-1622.eastus.inference.ml.azure.com/score",
+    httpheader=c('Content-Type' = "application/json", 'Authorization' = authz_hdr, 'azureml-model-deployment' = "phonechurn-deploy"),
+    postfields=requestBody,
+    writefunction = h$update,
+    headerfunction = hdr$update,
+    verbose = TRUE
+)
+
+headers = hdr$value()
+httpStatus = headers["status"]
+if (httpStatus >= 400)
+{
+    print(paste("The request failed with status code:", httpStatus, sep=" "))
+
+    # Print the headers - they include the request ID and the timestamp, which are useful for debugging the failure
+    print(headers)
+}
+
+print("Result:")
+result = h$value()
+print(result)
+```

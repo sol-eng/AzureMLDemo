@@ -1,0 +1,8 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+Azure_ML_Demo_files*
+*.html
+*.Rproj
+Azure_ML_Demo.html
